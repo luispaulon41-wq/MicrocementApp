@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JAVA_VERSION: '17'
-      ANDROID_API: '33'      # Android 14
+      ANDROID_API: '33'           # Android 14
       ANDROID_BUILD_TOOLS: '33.0.2'
-      MODULE_PATH: 'app'     # <-- caminho do módulo Android (ajuste se necessário)
+      MODULE_PATH: 'app'          # ajuste se o módulo do seu projecto tiver outro nome
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,7 +36,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      -name: Install Android SDK and commandline tools run: | set -eux ANDROID_SDK_ROOT="$HOME/android-sdk" mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" cd /tmp}
+      - name: Install Android SDK and commandline tools
+        run: |
+          set -eux
+          ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip -d cmdline-tools-temp
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          mv cmdline-tools-temp/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+          rm -rf cmdline-tools.zip cmdline-tools-temp
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-${{ env.ANDROID_API }}" "build-tools;${{ env.ANDROID_BUILD_TOOLS }}"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew || true
@@ -50,7 +65,7 @@ jobs:
       - name: Check for generated APK
         run: |
           APK_PATH=${{ env.MODULE_PATH }}/build/outputs/apk/debug
-          echo "Procurando APK em $APK_PATH"
+          echo "Looking for APK in $APK_PATH"
           ls -la $APK_PATH || true
 
       - name: Upload APK artifact
