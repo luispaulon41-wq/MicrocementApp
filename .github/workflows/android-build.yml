@@ -37,9 +37,9 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Install Android SDK and tools
-        uses: reactivecircus/android-emulator-runner@v2
+        uses:  android-actions/setup-android@v2 
         with:
-          api-level: ${{ env.ANDROID_API }}
+          api-level:  ${{ env.ANDROID_API }}
           build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
 
       - name: Grant execute permission for gradlew
