@@ -15,7 +15,7 @@ jobs:
       JAVA_VERSION: '17'
       ANDROID_API: '33'           # Android 14
       ANDROID_BUILD_TOOLS: '33.0.2'
-      MODULE_PATH: 'app'          # ajuste se o módulo do seu projecto tiver outro nome
+      # MODULE_PATH será detectado dinamicamente abaixo
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,6 +53,41 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "PATH=$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
+      - name: Detect Android module path from settings.gradle(.kts)
+        id: detect_module
+        run: |
+          set -e
+          # default guess
+          MODULE='app'
+          if [ -f settings.gradle ]; then
+            LINE=$(grep -E "include\\s+" settings.gradle | head -n1 || true)
+            if [ -n "$LINE" ]; then
+              # extract first include token, handle include ':module', include ':a', ':b'
+              TOK=$(echo "$LINE" | sed -E "s/.*include\\s+//; s/,/ /g; s/['\"]//g; awk '{print $1}' <<< \"$LINE\")
+              # normalize leading ":" and path separators
+              MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
+            fi
+          elif [ -f settings.gradle.kts ]; then
+            LINE=$(grep -E "include\\s+\\(" settings.gradle.kts || true)
+            if [ -n "$LINE" ]; then
+              TOK=$(sed -n '1p' settings.gradle.kts | sed -E "s/.*include\\((.*)\\).*/\\1/; s/[\"']//g; s/,/ /g" | awk '{print $1}')
+              MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
+            else
+              # fallback: try lines with include(":mymodule")
+              LINE=$(grep -E "include\\s+.*[:\"]" settings.gradle.kts | head -n1 || true)
+              if [ -n "$LINE" ]; then
+                TOK=$(echo "$LINE" | sed -E "s/.*include\\(?(.*)\\)?.*/\\1/; s/[\"'(),]//g; awk '{print $1}'")
+                MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
+              fi
+            fi
+          else
+            echo "No settings.gradle or settings.gradle.kts found; using default 'app'"
+          fi
+          # if MODULE empty, fallback to 'app'
+          if [ -z "$MODULE" ]; then MODULE='app'; fi
+          echo "Detected module: $MODULE"
+          echo "module=$MODULE" >> $GITHUB_OUTPUT
+
       - name: Install Gradle (if gradlew not present) via apt-get
         run: |
           set -eux
@@ -70,35 +105,39 @@ jobs:
 
       - name: Clean module (use gradlew if present, else gradle)
         run: |
+          set -eux
+          MODULE="${{ steps.detect_module.outputs.module }}"
+          echo "Cleaning module path: $MODULE"
           if [ -f ./gradlew ]; then
-            echo "Using gradle wrapper to clean module ${{ env.MODULE_PATH }}"
-            ./gradlew :${{ env.MODULE_PATH }}:clean --no-daemon
+            ./gradlew ":${MODULE}:clean" --no-daemon
           else
-            echo "Using system gradle to clean module ${{ env.MODULE_PATH }}"
-            gradle :${{ env.MODULE_PATH }}:clean --no-daemon
+            gradle ":${MODULE}:clean" --no-daemon
           fi
 
       - name: Assemble debug APK (use gradlew if present, else gradle)
         run: |
+          set -eux
+          MODULE="${{ steps.detect_module.outputs.module }}"
+          echo "Assembling debug APK for module: $MODULE"
           if [ -f ./gradlew ]; then
-            echo "Using gradle wrapper to assemble module ${{ env.MODULE_PATH }}"
-            ./gradlew :${{ env.MODULE_PATH }}:assembleDebug --no-daemon
+            ./gradlew ":${MODULE}:assembleDebug" --no-daemon
           else
-            echo "Using system gradle to assemble module ${{ env.MODULE_PATH }}"
-            gradle :${{ env.MODULE_PATH }}:assembleDebug --no-daemon
+            gradle ":${MODULE}:assembleDebug" --no-daemon
           fi
 
       - name: Check for generated APK
         run: |
-          APK_PATH=${{ env.MODULE_PATH }}/build/outputs/apk/debug
+          MODULE="${{ steps.detect_module.outputs.module }}"
+          APK_PATH="${MODULE}/build/outputs/apk/debug"
           echo "Looking for APK in $APK_PATH"
-          ls -la $APK_PATH || true
+          ls -la "$APK_PATH" || true
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: ${{ env.MODULE_PATH }}/build/outputs/apk/debug/*.apk
+          path: ${{ steps.detect_module.outputs.module }}/build/outputs/apk/debug/*.apk
+
 
 
 
