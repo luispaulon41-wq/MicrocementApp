@@ -68,13 +68,25 @@ jobs:
         run: |
           if [ -f ./gradlew ]; then chmod +x ./gradlew || true; fi
 
-      - name: Clean (use gradlew if present, else gradle)
+      - name: Clean module (use gradlew if present, else gradle)
         run: |
-          if [ -f ./gradlew ]; then ./gradlew clean --no-daemon; else gradle clean --no-daemon; fi
+          if [ -f ./gradlew ]; then
+            echo "Using gradle wrapper to clean module ${{ env.MODULE_PATH }}"
+            ./gradlew :${{ env.MODULE_PATH }}:clean --no-daemon
+          else
+            echo "Using system gradle to clean module ${{ env.MODULE_PATH }}"
+            gradle :${{ env.MODULE_PATH }}:clean --no-daemon
+          fi
 
       - name: Assemble debug APK (use gradlew if present, else gradle)
         run: |
-          if [ -f ./gradlew ]; then ./gradlew :${{ env.MODULE_PATH }}:assembleDebug --no-daemon; else gradle :${{ env.MODULE_PATH }}:assembleDebug --no-daemon; fi
+          if [ -f ./gradlew ]; then
+            echo "Using gradle wrapper to assemble module ${{ env.MODULE_PATH }}"
+            ./gradlew :${{ env.MODULE_PATH }}:assembleDebug --no-daemon
+          else
+            echo "Using system gradle to assemble module ${{ env.MODULE_PATH }}"
+            gradle :${{ env.MODULE_PATH }}:assembleDebug --no-daemon
+          fi
 
       - name: Check for generated APK
         run: |
@@ -87,5 +99,6 @@ jobs:
         with:
           name: app-debug-apk
           path: ${{ env.MODULE_PATH }}/build/outputs/apk/debug/*.apk
+
 
 
