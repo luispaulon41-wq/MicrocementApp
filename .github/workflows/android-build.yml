@@ -36,11 +36,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Install Android SDK and tools
-        uses:  android-actions/setup-android@v2 
-        with:
-          api-level:  ${{ env.ANDROID_API }}
-          build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
+      -name: Install Android SDK and commandline tools run: | set -eux ANDROID_SDK_ROOT="$HOME/android-sdk" mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" cd /tmp}
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew || true
