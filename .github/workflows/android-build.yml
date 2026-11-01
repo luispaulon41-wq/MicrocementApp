@@ -53,14 +53,31 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "PATH=$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew || true
+      - name: Install Gradle (if gradlew not present)
+        run: |
+          set -eux
+          if [ ! -f ./gradlew ]; then
+            sudo apt-get update
+            sudo apt-get install -y unzip curl
+            curl -s "https://get.sdkman.io" | bash
+            source "$HOME/.sdkman/bin/sdkman-init.sh"
+            sdk install gradle 8.4.1 || true
+            echo "Gradle installed"
+          else
+            echo "Gradle wrapper found, will use ./gradlew"
+          fi
 
-      - name: Clean
-        run: ./gradlew clean --no-daemon
+      - name: Grant execute permission for gradlew (if exists)
+        run: |
+          if [ -f ./gradlew ]; then chmod +x ./gradlew || true; fi
 
-      - name: Assemble debug APK
-        run: ./gradlew :${{ env.MODULE_PATH }}:assembleDebug --no-daemon
+      - name: Clean (use gradlew if present, else gradle)
+        run: |
+          if [ -f ./gradlew ]; then ./gradlew clean --no-daemon; else gradle clean --no-daemon; fi
+
+      - name: Assemble debug APK (use gradlew if present, else gradle)
+        run: |
+          if [ -f ./gradlew ]; then ./gradlew :${{ env.MODULE_PATH }}:assembleDebug --no-daemon; else gradle :${{ env.MODULE_PATH }}:assembleDebug --no-daemon; fi
 
       - name: Check for generated APK
         run: |
@@ -73,3 +90,4 @@ jobs:
         with:
           name: app-debug-apk
           path: ${{ env.MODULE_PATH }}/build/outputs/apk/debug/*.apk
+
