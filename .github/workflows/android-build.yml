@@ -56,34 +56,34 @@ jobs:
       - name: Detect Android module path from settings.gradle(.kts)
         id: detect_module
         run: |
-          set -e
+          set -eux
           # default guess
           MODULE='app'
           if [ -f settings.gradle ]; then
-            LINE=$(grep -E "include\\s+" settings.gradle | head -n1 || true)
+            # pega a primeira linha com include e extrai o primeiro token entre aspas ou após include
+            LINE=$(grep -E "include[[:space:]]+" settings.gradle | head -n1 || true)
             if [ -n "$LINE" ]; then
-              # extract first include token, handle include ':module', include ':a', ':b'
-              TOK=$(echo "$LINE" | sed -E "s/.*include\\s+//; s/,/ /g; s/['\"]//g; awk '{print $1}' <<< \"$LINE\")
-              # normalize leading ":" and path separators
+              # tenta extrair algo entre aspas '...' ou "..."
+              TOK=$(echo "$LINE" | sed -n "s/.*['\"]\([^'\"]*\)['\"].*/\1/p" | awk -F, '{print $1}' | awk '{print $1}' || true)
+              if [ -z "$TOK" ]; then
+                # alternativa: pega o primeiro campo após include (sem aspas)
+                TOK=$(echo "$LINE" | sed -E "s/.*include[[:space:]]+//" | awk -F, '{print $1}' | tr -d \"'[:space:]')
+              fi
               MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
             fi
           elif [ -f settings.gradle.kts ]; then
-            LINE=$(grep -E "include\\s+\\(" settings.gradle.kts || true)
+            LINE=$(grep -E "include\\(?" settings.gradle.kts | head -n1 || true)
             if [ -n "$LINE" ]; then
-              TOK=$(sed -n '1p' settings.gradle.kts | sed -E "s/.*include\\((.*)\\).*/\\1/; s/[\"']//g; s/,/ /g" | awk '{print $1}')
-              MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
-            else
-              # fallback: try lines with include(":mymodule")
-              LINE=$(grep -E "include\\s+.*[:\"]" settings.gradle.kts | head -n1 || true)
-              if [ -n "$LINE" ]; then
-                TOK=$(echo "$LINE" | sed -E "s/.*include\\(?(.*)\\)?.*/\\1/; s/[\"'(),]//g; awk '{print $1}'")
-                MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
+              TOK=$(echo "$LINE" | sed -n "s/.*['\"]\([^'\"]*\)['\"].*/\1/p" | awk -F, '{print $1}' | awk '{print $1}' || true)
+              if [ -z "$TOK" ]; then
+                TOK=$(echo "$LINE" | sed -E "s/.*include\\(?(.*)\\)?.*/\\1/" | tr -d \"'()[:space:],)
+                TOK=$(echo "$TOK" | awk '{print $1}')
               fi
+              MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
             fi
           else
             echo "No settings.gradle or settings.gradle.kts found; using default 'app'"
           fi
-          # if MODULE empty, fallback to 'app'
           if [ -z "$MODULE" ]; then MODULE='app'; fi
           echo "Detected module: $MODULE"
           echo "module=$MODULE" >> $GITHUB_OUTPUT
