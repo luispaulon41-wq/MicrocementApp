@@ -137,7 +137,3 @@ jobs:
         with:
           name: app-debug-apk
           path: ${{ steps.detect_module.outputs.module }}/build/outputs/apk/debug/*.apk
-
-
-
-
