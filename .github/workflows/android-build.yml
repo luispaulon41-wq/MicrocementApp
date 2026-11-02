@@ -53,25 +53,26 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "PATH=$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
-      - name: Detect Android module path from settings.gradle(.kts)
+      - name: Detect Android module path (robust)
         id: detect_module
         run: |
           set -eux
-          MODULE="app"
-          # Prefer settings.gradle, fallback to settings.gradle.kts
+          MODULE=""
+
+          # 1) try settings.gradle
           if [ -f settings.gradle ]; then
-            # Find first include line, extract first quoted token or first token after include
             LINE=$(grep -E "^[[:space:]]*include" settings.gradle | head -n1 || true)
             if [ -n "$LINE" ]; then
-              # Try to extract between quotes '...' or "..."
               TOK=$(echo "$LINE" | sed -n "s/.*['\"]\([^'\"]*\)['\"].*/\1/p" || true)
               if [ -z "$TOK" ]; then
-                # fallback: take first field after include, remove quotes and commas
                 TOK=$(echo "$LINE" | sed -E "s/^[[:space:]]*include[[:space:]]+//" | tr -d \"'() | tr ',' ' ' | awk '{print $1}' || true)
               fi
               MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
             fi
-          elif [ -f settings.gradle.kts ]; then
+          fi
+
+          # 2) try settings.gradle.kts
+          if [ -z "$MODULE" ] && [ -f settings.gradle.kts ]; then
             LINE=$(grep -E "^[[:space:]]*include" settings.gradle.kts | head -n1 || true)
             if [ -n "$LINE" ]; then
               TOK=$(echo "$LINE" | sed -n "s/.*['\"]\([^'\"]*\)['\"].*/\1/p" || true)
@@ -80,11 +81,27 @@ jobs:
               fi
               MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
             fi
-          else
-            echo "No settings.gradle or settings.gradle.kts found; defaulting to 'app'"
           fi
-          if [ -z "$MODULE" ]; then MODULE="app"; fi
-          echo "Detected module: $MODULE"
+
+          # 3) fallback: find first subfolder that contains build.gradle or build.gradle.kts
+          if [ -z "$MODULE" ]; then
+            for d in $(find . -maxdepth 2 -type f \( -name "build.gradle" -o -name "build.gradle.kts" \) -printf '%h\n' | sort -u); do
+              # skip root if it's the repository root and has no module layout
+              if [ "$d" = "." ]; then
+                continue
+              fi
+              # choose first candidate folder name (strip leading ./)
+              MODULE=$(echo "$d" | sed 's#^\./##')
+              break
+            done
+          fi
+
+          # 4) final fallback to 'app'
+          if [ -z "$MODULE" ]; then
+            MODULE="app"
+          fi
+
+          echo "Detected module path: $MODULE"
           echo "module=$MODULE" >> $GITHUB_OUTPUT
 
       - name: Install Gradle (if gradlew not present) via apt-get
@@ -136,3 +153,4 @@ jobs:
         with:
           name: app-debug-apk
           path: ${{ steps.detect_module.outputs.module }}/build/outputs/apk/debug/*.apk
+
