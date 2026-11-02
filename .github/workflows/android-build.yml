@@ -1,156 +1,50 @@
-name: Build debug APK
+name: Diagnose repo and produce module path
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - develop
 
 jobs:
-  build:
-    name: Build debug APK
+  diagnose:
+    name: Repo diagnostic (find Gradle modules)
     runs-on: ubuntu-latest
-    env:
-      JAVA_VERSION: '17'
-      ANDROID_API: '33'           # Android 14
-      ANDROID_BUILD_TOOLS: '33.0.2'
-      # MODULE will be detected dynamically
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: ${{ env.JAVA_VERSION }}
+          fetch-depth: 1
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*','**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: Install Android SDK and commandline tools
+      - name: Show Git status and root files
         run: |
-          set -eux
-          ANDROID_SDK_ROOT="$HOME/android-sdk"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          cd /tmp
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip -d cmdline-tools-temp
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mv cmdline-tools-temp/cmdline-tools/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
-          rm -rf cmdline-tools.zip cmdline-tools-temp
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-${{ env.ANDROID_API }}" "build-tools;${{ env.ANDROID_BUILD_TOOLS }}"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "PATH=$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+          echo "---- pwd ----"
+          pwd
+          echo "---- ls -la (root) ----"
+          ls -la
+          echo "---- show .gitignore (if exists) ----"
+          [ -f .gitignore ] && echo '--- .gitignore ---' && sed -n '1,200p' .gitignore || echo '.gitignore not found'
 
-      - name: Detect Android module path (robust)
-        id: detect_module
+      - name: Repo diagnostic - list tree and find gradle files
         run: |
-          set -eux
-          MODULE=""
+          echo "---- full tree (maxdepth 3) ----"
+          # show a compact tree up to depth 3
+          apt-get update -y >/dev/null
+          apt-get install -y tree >/dev/null
+          tree -a -L 3 || true
 
-          # 1) try settings.gradle
-          if [ -f settings.gradle ]; then
-            LINE=$(grep -E "^[[:space:]]*include" settings.gradle | head -n1 || true)
-            if [ -n "$LINE" ]; then
-              TOK=$(echo "$LINE" | sed -n "s/.*['\"]\([^'\"]*\)['\"].*/\1/p" || true)
-              if [ -z "$TOK" ]; then
-                TOK=$(echo "$LINE" | sed -E "s/^[[:space:]]*include[[:space:]]+//" | tr -d \"'() | tr ',' ' ' | awk '{print $1}' || true)
-              fi
-              MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
-            fi
-          fi
+          echo "---- find build.gradle and build.gradle.kts files (full paths) ----"
+          find . -type f \( -name "build.gradle" -o -name "build.gradle.kts" -o -name "settings.gradle" -o -name "settings.gradle.kts" \) -print || true
 
-          # 2) try settings.gradle.kts
-          if [ -z "$MODULE" ] && [ -f settings.gradle.kts ]; then
-            LINE=$(grep -E "^[[:space:]]*include" settings.gradle.kts | head -n1 || true)
-            if [ -n "$LINE" ]; then
-              TOK=$(echo "$LINE" | sed -n "s/.*['\"]\([^'\"]*\)['\"].*/\1/p" || true)
-              if [ -z "$TOK" ]; then
-                TOK=$(echo "$LINE" | sed -E "s/^[[:space:]]*include\\(?(.*)\\)?.*/\\1/" | tr -d \"'() | tr ',' ' ' | awk '{print $1}' || true)
-              fi
-              MODULE=$(echo "$TOK" | sed -E "s/^:+//; s/:/\\//g")
-            fi
-          fi
+          echo "---- content preview for settings files (if present) ----"
+          [ -f settings.gradle ] && echo '--- settings.gradle ---' && sed -n '1,120p' settings.gradle || true
+          [ -f settings.gradle.kts ] && echo '--- settings.gradle.kts ---' && sed -n '1,120p' settings.gradle.kts || true
 
-          # 3) fallback: find first subfolder that contains build.gradle or build.gradle.kts
-          if [ -z "$MODULE" ]; then
-            for d in $(find . -maxdepth 2 -type f \( -name "build.gradle" -o -name "build.gradle.kts" \) -printf '%h\n' | sort -u); do
-              # skip root if it's the repository root and has no module layout
-              if [ "$d" = "." ]; then
-                continue
-              fi
-              # choose first candidate folder name (strip leading ./)
-              MODULE=$(echo "$d" | sed 's#^\./##')
-              break
-            done
-          fi
+          echo "---- top-level directories list (helpful for module guess) ----"
+          find . -maxdepth 2 -type d -printf '%P\n' | sed '/^$/d' || true
 
-          # 4) final fallback to 'app'
-          if [ -z "$MODULE" ]; then
-            MODULE="app"
-          fi
-
-          echo "Detected module path: $MODULE"
-          echo "module=$MODULE" >> $GITHUB_OUTPUT
-
-      - name: Install Gradle (if gradlew not present) via apt-get
-        run: |
-          set -eux
-          if [ ! -f ./gradlew ]; then
-            sudo apt-get update
-            sudo apt-get install -y gradle
-            gradle --version
-          else
-            echo "Gradle wrapper found, will use ./gradlew"
-          fi
-
-      - name: Grant execute permission for gradlew (if exists)
-        run: |
-          if [ -f ./gradlew ]; then chmod +x ./gradlew || true; fi
-
-      - name: Clean module (use gradlew if present, else gradle)
-        run: |
-          set -eux
-          MODULE="${{ steps.detect_module.outputs.module }}"
-          echo "Cleaning module path: $MODULE"
-          if [ -f ./gradlew ]; then
-            ./gradlew ":${MODULE}:clean" --no-daemon
-          else
-            gradle ":${MODULE}:clean" --no-daemon
-          fi
-
-      - name: Assemble debug APK (use gradlew if present, else gradle)
-        run: |
-          set -eux
-          MODULE="${{ steps.detect_module.outputs.module }}"
-          echo "Assembling debug APK for module: $MODULE"
-          if [ -f ./gradlew ]; then
-            ./gradlew ":${MODULE}:assembleDebug" --no-daemon
-          else
-            gradle ":${MODULE}:assembleDebug" --no-daemon
-          fi
-
-      - name: Check for generated APK
-        run: |
-          MODULE="${{ steps.detect_module.outputs.module }}"
-          APK_PATH="${MODULE}/build/outputs/apk/debug"
-          echo "Looking for APK in $APK_PATH"
-          ls -la "$APK_PATH" || true
-
-      - name: Upload APK artifact
+      - name: Save diagnostic as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: ${{ steps.detect_module.outputs.module }}/build/outputs/apk/debug/*.apk
+          name: repo-diagnostic
+          path: |
+            .   # upload repo root (small) so you can inspect, but large repos may be partial
+        if: always()
 
