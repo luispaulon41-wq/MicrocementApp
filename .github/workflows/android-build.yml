@@ -25,7 +25,6 @@ jobs:
       - name: Repo diagnostic - list tree and find gradle files
         run: |
           echo "---- full tree (maxdepth 3) ----"
-          # show a compact tree up to depth 3
           apt-get update -y >/dev/null
           apt-get install -y tree >/dev/null
           tree -a -L 3 || true
@@ -45,6 +44,5 @@ jobs:
         with:
           name: repo-diagnostic
           path: |
-            .   # upload repo root (small) so you can inspect, but large repos may be partial
+            .
         if: always()
-
